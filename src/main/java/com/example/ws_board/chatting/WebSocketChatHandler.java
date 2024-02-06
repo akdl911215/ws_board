@@ -1,6 +1,8 @@
 package com.example.ws_board.chatting;
 
-import com.example.ws_board.dtos.ChatMessageDto;
+import com.example.ws_board.chatting.dtos.ChatMessageDto;
+import com.example.ws_board.chatting.dtos.ChatRoom;
+import com.example.ws_board.chatting.service.ChatService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -20,7 +22,8 @@ import java.util.Set;
 @Component
 @RequiredArgsConstructor
 public class WebSocketChatHandler extends TextWebSocketHandler {
-    private final ObjectMapper mapper;
+    private final ObjectMapper objectMapper;
+    private final ChatService chatService;
 
     // 현재 연결된 세션들
     private final Set<WebSocketSession> sessions = new HashSet<>();
@@ -40,33 +43,31 @@ public class WebSocketChatHandler extends TextWebSocketHandler {
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
         String payload = message.getPayload();
-        log.info("payload {}", payload);
-
-        // 페이로드 -> chatMessageDto로 변환
-        ChatMessageDto chatMessageDto = mapper.readValue(payload, ChatMessageDto.class);
-        log.info("session {}", chatMessageDto.toString());
-
-        Long chatRoomId = chatMessageDto.getChatRoomId();
-
-        // 메모리 상에 채팅방에 대한 세션 없으면 만들어준다.
-        if (!chatRoomSessionMap.containsKey(chatRoomId)) {
-            chatRoomSessionMap.put(chatRoomId, new HashSet<>());
+        ChatMessageDto chatMessage = objectMapper.readValue(payload, ChatMessageDto.class);
+        ChatRoom room = chatService.findRoomById(chatMessage.getRoomId());
+        Set<WebSocketSession> sessions=room.getSessions();   //방에 있는 현재 사용자 한명이 WebsocketSession
+        if (chatMessage.getMessageType().equals(ChatMessageDto.MessageType.ENTER)) {
+            //사용자가 방에 입장하면  Enter메세지를 보내도록 해놓음.  이건 새로운사용자가 socket 연결한 것이랑은 다름.
+            //socket연결은 이 메세지 보내기전에 이미 되어있는 상태
+            sessions.add(session);
+            chatMessage.setMessage(chatMessage.getSenderId() + "님이 입장했습니다.");  //TALK일 경우 msg가 있을 거고, ENTER일 경우 메세지 없으니까 message set
+            sendToEachSocket(sessions,new TextMessage(objectMapper.writeValueAsString(chatMessage)) );
+        }else if (chatMessage.getMessageType().equals(ChatMessageDto.MessageType.QUIT)) {
+            sessions.remove(session);
+            chatMessage.setMessage(chatMessage.getSenderId() + "님이 퇴장했습니다..");
+            sendToEachSocket(sessions,new TextMessage(objectMapper.writeValueAsString(chatMessage)) );
+        }else {
+            sendToEachSocket(sessions,message ); //입장,퇴장 아닐 때는 클라이언트로부터 온 메세지 그대로 전달.
         }
-        Set<WebSocketSession> chatRoomSession = chatRoomSessionMap.get(chatRoomId);
-
-        // message 에 담긴 타입을 확인한다.
-        // 이때 message 에서 getType 으로 가져온 내용이
-        // ChatDTO 의 열거형인 MessageType 안에 있는 ENTER 와 동일한 값이라면
-        if (chatMessageDto.getMessageType().equals(ChatMessageDto.MessageType.ENTER)) {
-            // sessions 에 넘어온 session 을 담고,
-            chatRoomSession.add(session);
-        }
-
-        if (chatRoomSession.size() >= 3) {
-            removeClosedSession(chatRoomSession);
-        }
-
-        sendMessageToChatRoom(chatMessageDto, chatRoomSession);
+    }
+    private  void sendToEachSocket(Set<WebSocketSession> sessions, TextMessage message){
+        sessions.parallelStream().forEach( roomSession -> {
+            try {
+                roomSession.sendMessage(message);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        });
     }
 
     // 소켓 종료 확인
@@ -88,7 +89,7 @@ public class WebSocketChatHandler extends TextWebSocketHandler {
 
     public <T> void sendMessage(WebSocketSession session, T message) {
         try {
-            session.sendMessage(new TextMessage(mapper.writeValueAsString(message)));
+            session.sendMessage(new TextMessage(objectMapper.writeValueAsString(message)));
         } catch (IOException e) {
             log.error(e.getMessage(), e);
         }

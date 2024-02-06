@@ -1,4 +1,4 @@
-package com.example.ws_board.dtos;
+package com.example.ws_board.chatting.dtos;
 
 import lombok.Builder;
 import lombok.Getter;

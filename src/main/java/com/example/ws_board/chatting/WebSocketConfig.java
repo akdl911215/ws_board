@@ -17,8 +17,8 @@ public class WebSocketConfig implements WebSocketConfigurer {
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
 
-        // ws://127.0.0.1:88/ws/chat 으로 요청이 들어오면 websocket 통신을 진행한다.
+        // ws://127.0.0.1:8080/chat 으로 요청이 들어오면 websocket 통신을 진행한다.
         // setAllowedOrigins("*") 는 모든 ip 에서 접속 가능하도록 해줌
-        registry.addHandler(webSocketHandler, "/ws/chat").setAllowedOrigins("*");
+        registry.addHandler(webSocketHandler, "/chat").setAllowedOrigins("*");
     }
 }
