@@ -1,6 +1,5 @@
 package com.example.ws_board.chatting.controller;
 
-import com.example.ws_board.chatting.dtos.ChatMessageDto;
 import com.example.ws_board.chatting.dtos.ChatRoom;
 import com.example.ws_board.chatting.service.ChatService;
 import lombok.RequiredArgsConstructor;

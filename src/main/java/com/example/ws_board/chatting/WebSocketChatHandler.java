@@ -1,6 +1,6 @@
 package com.example.ws_board.chatting;
 
-import com.example.ws_board.chatting.dtos.ChatMessageDto;
+import com.example.ws_board.chatting.dtos.Message;
 import com.example.ws_board.chatting.dtos.ChatRoom;
 import com.example.ws_board.chatting.service.ChatService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -17,60 +17,59 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class WebSocketChatHandler extends TextWebSocketHandler {
+    private final Map<String, WebSocketSession> sessions = new ConcurrentHashMap<>();
     private final ObjectMapper objectMapper;
-    private final ChatService chatService;
 
-    // 현재 연결된 세션들
-    private final Set<WebSocketSession> sessions = new HashSet<>();
-
-    // chatRoomId: {session1, session2}
-    private final Map<Long, Set<WebSocketSession>> chatRoomSessionMap = new HashMap<>();
-
-    // 소켓 연결 확인
+    // 웹소켓 연결
     @Override
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
-        // TODO Auto-generated method stub
-        log.info("{} 연결됨", session.getId());
-        sessions.add(session);
-    }
 
-    // 소켓 통신 시 메세지의 전송을 다루는 부분
-    @Override
-    protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
-        String payload = message.getPayload();
-        ChatMessageDto chatMessage = objectMapper.readValue(payload, ChatMessageDto.class);
-        ChatRoom room = chatService.findRoomById(chatMessage.getRoomId());
-        Set<WebSocketSession> sessions=room.getSessions();   //방에 있는 현재 사용자 한명이 WebsocketSession
-        if (chatMessage.getMessageType().equals(ChatMessageDto.MessageType.ENTER)) {
-            //사용자가 방에 입장하면  Enter메세지를 보내도록 해놓음.  이건 새로운사용자가 socket 연결한 것이랑은 다름.
-            //socket연결은 이 메세지 보내기전에 이미 되어있는 상태
-            sessions.add(session);
-            chatMessage.setMessage(chatMessage.getSenderId() + "님이 입장했습니다.");  //TALK일 경우 msg가 있을 거고, ENTER일 경우 메세지 없으니까 message set
-            sendToEachSocket(sessions,new TextMessage(objectMapper.writeValueAsString(chatMessage)) );
-        }else if (chatMessage.getMessageType().equals(ChatMessageDto.MessageType.QUIT)) {
-            sessions.remove(session);
-            chatMessage.setMessage(chatMessage.getSenderId() + "님이 퇴장했습니다..");
-            sendToEachSocket(sessions,new TextMessage(objectMapper.writeValueAsString(chatMessage)) );
-        }else {
-            sendToEachSocket(sessions,message ); //입장,퇴장 아닐 때는 클라이언트로부터 온 메세지 그대로 전달.
-        }
-    }
-    private  void sendToEachSocket(Set<WebSocketSession> sessions, TextMessage message){
-        sessions.parallelStream().forEach( roomSession -> {
+        String sessionId = session.getId();
+        sessions.put(sessionId, session); // session save
+
+        Message message = Message.builder().sender(sessionId).receiver("all").build();
+        message.newConnect();
+
+        sessions.values().forEach(s -> {
             try {
-                roomSession.sendMessage(message);
-            } catch (IOException e) {
+                if (!s.getId().equals(sessionId)) {
+                    s.sendMessage(new TextMessage(sessionId + "님이 입장 하셨습니다."));
+                }
+            } catch (Exception e) {
                 throw new RuntimeException(e);
             }
         });
+
+//        super.afterConnectionEstablished(session);
     }
 
-    // 소켓 종료 확인
+    // 양방향 데이터 통신
+    @Override
+    protected void handleTextMessage(WebSocketSession session, TextMessage textMessage) throws Exception {
+
+        Message message = objectMapper.readValue(textMessage.getPayload(), Message.class);
+        message.setSender(session.getId());
+
+        log.info("type : {}", message.getType());
+        log.info("sender : {}", message.getSender());
+        log.info("receiver : {}", message.getReceiver());
+        log.info("data : {}", message.getData());
+
+        WebSocketSession receiver = sessions.get(message.getReceiver()); // 메시지 수신자 찾기
+
+        if (receiver != null && receiver.isOpen()) {
+            // 수신자가 존재하고 연결된 상태일 경우 메시지르르 전송한다.
+            receiver.sendMessage(new TextMessage(objectMapper.writeValueAsString(message)));
+        }
+    }
+
+    // 소켓 연결 종료
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) throws Exception {
         // TODO auto-generated method stub
@@ -78,21 +77,7 @@ public class WebSocketChatHandler extends TextWebSocketHandler {
         sessions.remove(session);
     }
 
-    // 채팅 관련 메소드
-    private void removeClosedSession(Set<WebSocketSession> chatRoomSession) {
-        chatRoomSession.removeIf(session -> !sessions.contains(session));
-    }
-
-    private void sendMessageToChatRoom(ChatMessageDto chatMessageDto, Set<WebSocketSession> chatRoomSession) {
-        chatRoomSession.parallelStream().forEach(session -> sendMessage(session, chatMessageDto));
-    }
-
-    public <T> void sendMessage(WebSocketSession session, T message) {
-        try {
-            session.sendMessage(new TextMessage(objectMapper.writeValueAsString(message)));
-        } catch (IOException e) {
-            log.error(e.getMessage(), e);
-        }
-    }
-
+    // 소켓 통신 에러
+//    @Override
+//    public void handleTransportError(WebSocketSession session) {}
 }
